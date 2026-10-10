@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -121,8 +122,19 @@ public abstract class AbstractSerializable {
 
   public boolean load(BufferedReader reader) {
     AbstractReader abstractReader = this.getReader(reader);
-    abstractReader.readSerializableObject(this, this.getClass());
-    return !abstractReader.isBackupPreferred();
+    abstractReader.beginTransaction();
+    try {
+      abstractReader.readSerializableObject(this, this.getClass());
+      abstractReader.commitTransaction();
+      return !abstractReader.isBackupPreferred();
+    } catch (RuntimeException | Error failure) {
+      try {
+        abstractReader.rollbackTransaction();
+      } catch (RuntimeException | Error rollbackFailure) {
+        failure.addSuppressed(rollbackFailure);
+      }
+      throw failure;
+    }
   }
 
   public void save() {
@@ -223,7 +235,17 @@ public abstract class AbstractSerializable {
         throw new NullPointerException("Parent path is null for " + absolutePath);
       }
 
-      Files.copy(absolutePath, parent.resolve(absolutePath.getFileName() + "_backup_" + LocalDateTime.now().format(AbstractSerializable.BACKUP_DATE_PATTERN)), StandardCopyOption.REPLACE_EXISTING);
+      String name = absolutePath.getFileName() + "_backup_" + LocalDateTime.now().format(AbstractSerializable.BACKUP_DATE_PATTERN);
+      int suffix = 0;
+      while (true) {
+        Path backup = parent.resolve(name + (suffix == 0 ? "" : "_" + suffix));
+        try {
+          Files.copy(absolutePath, backup);
+          break;
+        } catch (FileAlreadyExistsException e) {
+          suffix++;
+        }
+      }
     } catch (IOException e) {
       throw new SerializableWriteException(e);
     }

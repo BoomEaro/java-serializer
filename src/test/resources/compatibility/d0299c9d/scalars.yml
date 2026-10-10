@@ -1,0 +1,27 @@
+byte-value: -12
+short-value: 32000
+int-value: 123456
+long-value: 9876543210
+float-value: 1.25
+double-value: -2.5
+boolean-value: true
+char-value: Z
+boxed-bytes:
+  - 12
+  - -12
+boxed-shorts:
+  - -32000
+  - 32000
+boxed-ints:
+  - -123456
+  - 123456
+boxed-long: -9876543210
+boxed-floats:
+  - -1.25
+  - 1.25
+boxed-double: 2.5
+boxed-boolean: false
+boxed-char: x
+text: "hello world"
+null-value: null
+mode: SECOND

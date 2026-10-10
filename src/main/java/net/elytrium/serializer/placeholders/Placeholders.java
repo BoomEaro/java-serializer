@@ -17,38 +17,39 @@
 
 package net.elytrium.serializer.placeholders;
 
+import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import net.elytrium.serializer.utils.GenericUtils;
 
 @SuppressWarnings("unchecked")
 public class Placeholders {
 
-  private static final Map<Integer, Placeholderable<?, ?>> PLACEHOLDERS = new HashMap<>();
+  private static final ReferenceQueue<Object> COLLECTED_HOLDERS = new ReferenceQueue<>();
+  private static final Map<IdentityReference, Placeholderable<?, ?>> PLACEHOLDERS = new HashMap<>();
+  private static final Map<Integer, Placeholderable<?, ?>> LEGACY_PLACEHOLDERS = new HashMap<>();
 
   public static <T, R> R replace(T value, Object... values) {
     return Placeholders.replaceFor(value, value, values);
   }
 
   public static <H, T, P, R> R replaceFor(H holder, T value, Object... values) {
-    var placeholderable = (Placeholderable<T, P>) Placeholders.PLACEHOLDERS.get(System.identityHashCode(holder));
-    if (holder instanceof Collection<?> collection) {
+    var placeholderable = (Placeholderable<T, P>) Placeholders.lookup(holder);
+    if (value instanceof Collection<?> collection) {
       List<T> result = new ArrayList<>(collection.size());
       for (Object entry : collection) {
-        if (placeholderable == null) {
-          placeholderable = (Placeholderable<T, P>) Placeholders.PLACEHOLDERS.get(System.identityHashCode(entry));
-        }
-
-        if (placeholderable == null) {
+        var entryPlaceholders = placeholderable == null ? (Placeholderable<T, P>) Placeholders.lookup(entry) : placeholderable;
+        if (entryPlaceholders == null) {
           throw new IllegalStateException("Invalid input!");
         }
 
-        result.add(placeholderable.replacer.replace((T) entry, placeholderable.placeholders, values));
+        result.add(entryPlaceholders.replacer.replace((T) entry, entryPlaceholders.placeholders, values));
       }
 
       return (R) result;
@@ -64,76 +65,136 @@ public class Placeholders {
   }
 
   public static void addPlaceholders(Object value, PlaceholderReplacer<?, ?> replacer, boolean wrapWithBraces, String... placeholders) {
-    Placeholders.addPlaceholders(System.identityHashCode(value), replacer, wrapWithBraces, placeholders);
+    Placeholders.prepareRegistration(value, replacer, wrapWithBraces, placeholders).run();
   }
 
+  @Deprecated
   public static void addPlaceholders(int hash, PlaceholderReplacer<?, ?> replacer, String... placeholders) {
     Placeholders.addPlaceholders(hash, replacer, true, placeholders);
   }
 
-  public static void addPlaceholders(int hash, PlaceholderReplacer<?, ?> replacer, boolean wrapWithBraces, String... placeholders) {
-    Placeholders.PLACEHOLDERS.put(hash, new Placeholderable<>(replacer, placeholders, wrapWithBraces));
+  @Deprecated
+  public static synchronized void addPlaceholders(int hash, PlaceholderReplacer<?, ?> replacer, boolean wrapWithBraces, String... placeholders) {
+    Placeholders.LEGACY_PLACEHOLDERS.put(hash, new Placeholderable<>(replacer, placeholders, wrapWithBraces));
   }
 
-  public static void setPlaceholders(Object value, PlaceholderReplacer<?, ?> fallbackReplacer, String... placeholders) {
-    Placeholders.setPlaceholders(System.identityHashCode(value), fallbackReplacer, placeholders);
+  public static synchronized void setPlaceholders(Object value, PlaceholderReplacer<?, ?> fallbackReplacer, String... placeholders) {
+    Placeholderable<?, ?> placeholderable = Placeholders.lookup(value);
+    if (placeholderable != null) {
+      placeholderable.setPlaceholders(placeholders, true);
+    } else if (fallbackReplacer != null) {
+      Placeholders.addPlaceholders(value, fallbackReplacer, true, placeholders);
+    }
   }
 
+  @Deprecated
   public static void setPlaceholders(int hash, PlaceholderReplacer<?, ?> fallbackReplacer, String... placeholders) {
     Placeholders.setPlaceholders(hash, fallbackReplacer, true, placeholders);
   }
 
-  public static void setPlaceholders(int hash, PlaceholderReplacer<?, ?> fallbackReplacer, boolean wrapWithBraces, String... placeholders) {
-    Placeholderable<?, ?> placeholderable = Placeholders.PLACEHOLDERS.get(hash);
+  @Deprecated
+  public static synchronized void setPlaceholders(int hash, PlaceholderReplacer<?, ?> fallbackReplacer, boolean wrapWithBraces, String... placeholders) {
+    Placeholderable<?, ?> placeholderable = Placeholders.LEGACY_PLACEHOLDERS.get(hash);
     if (placeholderable == null) {
       if (fallbackReplacer != null) {
-        Placeholders.addPlaceholders(hash, fallbackReplacer, placeholders);
+        Placeholders.addPlaceholders(hash, fallbackReplacer, wrapWithBraces, placeholders);
       }
     } else {
       placeholderable.setPlaceholders(placeholders, wrapWithBraces);
     }
   }
 
-  public static void removePlaceholders(Object value) {
-    Placeholders.removePlaceholders(System.identityHashCode(value));
+  public static synchronized void removePlaceholders(Object value) {
+    Placeholders.expungeCollectedHolders();
+    Placeholders.PLACEHOLDERS.remove(new IdentityReference(value, null));
+    Placeholders.LEGACY_PLACEHOLDERS.remove(System.identityHashCode(value));
   }
 
-  public static void removePlaceholders(int hash) {
-    Placeholders.PLACEHOLDERS.remove(hash);
+  @Deprecated
+  public static synchronized void removePlaceholders(int hash) {
+    Placeholders.LEGACY_PLACEHOLDERS.remove(hash);
   }
 
   public static boolean hasPlaceholders(Object value) {
-    return Placeholders.hasPlaceholders(System.identityHashCode(value));
+    return Placeholders.lookup(value) != null;
   }
 
-  public static boolean hasPlaceholders(int hash) {
-    return Placeholders.PLACEHOLDERS.containsKey(hash);
+  @Deprecated
+  public static synchronized boolean hasPlaceholders(int hash) {
+    return Placeholders.LEGACY_PLACEHOLDERS.containsKey(hash);
   }
 
   public static <P> P[] getPlaceholders(Object value) {
-    return Placeholders.getPlaceholders(System.identityHashCode(value));
+    return ((Placeholderable<?, P>) Placeholders.require(Placeholders.lookup(value))).placeholders.clone();
   }
 
-  public static <P> P[] getPlaceholders(int hash) {
-    var placeholderable = (Placeholderable<?, P>) Placeholders.PLACEHOLDERS.get(hash);
-    if (placeholderable == null) {
-      throw new IllegalStateException("Invalid input!");
-    } else {
-      return placeholderable.placeholders;
-    }
+  @Deprecated
+  public static synchronized <P> P[] getPlaceholders(int hash) {
+    return ((Placeholderable<?, P>) Placeholders.require(Placeholders.LEGACY_PLACEHOLDERS.get(hash))).placeholders.clone();
   }
 
   public static <T> PlaceholderReplacer<T, ?> getReplacer(T value) {
-    return Placeholders.getReplacer(System.identityHashCode(value));
+    return ((Placeholderable<T, ?>) Placeholders.require(Placeholders.lookup(value))).replacer;
   }
 
-  @SuppressWarnings("unchecked")
-  public static <T> PlaceholderReplacer<T, ?> getReplacer(int hash) {
-    var placeholderable = (Placeholderable<T, ?>) Placeholders.PLACEHOLDERS.get(hash);
+  @Deprecated
+  public static synchronized <T> PlaceholderReplacer<T, ?> getReplacer(int hash) {
+    return ((Placeholderable<T, ?>) Placeholders.require(Placeholders.LEGACY_PLACEHOLDERS.get(hash))).replacer;
+  }
+
+  private static synchronized Placeholderable<?, ?> lookup(Object holder) {
+    Placeholders.expungeCollectedHolders();
+    Placeholderable<?, ?> result = Placeholders.PLACEHOLDERS.get(new IdentityReference(holder, null));
+    return result == null ? Placeholders.LEGACY_PLACEHOLDERS.get(System.identityHashCode(holder)) : result;
+  }
+
+  /**
+   * Validates and transforms placeholders now, deferring only their registration until the returned action runs.
+   */
+  public static Runnable prepareRegistration(Object value, PlaceholderReplacer<?, ?> replacer, boolean wrapWithBraces, String... placeholders) {
+    Objects.requireNonNull(value, "Placeholder holder");
+    Placeholderable<?, ?> registration = new Placeholderable<>(replacer, placeholders, wrapWithBraces);
+    return () -> {
+      synchronized (Placeholders.class) {
+        Placeholders.expungeCollectedHolders();
+        Placeholders.PLACEHOLDERS.put(new IdentityReference(value, Placeholders.COLLECTED_HOLDERS), registration);
+      }
+    };
+  }
+
+  private static Placeholderable<?, ?> require(Placeholderable<?, ?> placeholderable) {
     if (placeholderable == null) {
       throw new IllegalStateException("Invalid input!");
     } else {
-      return placeholderable.replacer;
+      return placeholderable;
+    }
+  }
+
+  private static void expungeCollectedHolders() {
+    IdentityReference reference;
+    while ((reference = (IdentityReference) Placeholders.COLLECTED_HOLDERS.poll()) != null) {
+      Placeholders.PLACEHOLDERS.remove(reference);
+    }
+  }
+
+  private static final class IdentityReference extends WeakReference<Object> {
+
+    private final int hash;
+
+    private IdentityReference(Object holder, ReferenceQueue<Object> queue) {
+      super(holder, queue);
+      this.hash = System.identityHashCode(holder);
+    }
+
+    @Override
+    public int hashCode() {
+      return this.hash;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      Object holder = this.get();
+      return this == other || other instanceof IdentityReference reference && holder != null && holder == reference.get();
     }
   }
 
@@ -141,7 +202,7 @@ public class Placeholders {
 
     private final PlaceholderReplacer<T, P> replacer;
     private final Class<P> placeholdersClass;
-    private P[] placeholders;
+    private volatile P[] placeholders;
 
     private Placeholderable(PlaceholderReplacer<T, P> replacer, String[] placeholders, boolean wrapWithBraces) {
       this.replacer = replacer;
@@ -150,25 +211,22 @@ public class Placeholders {
     }
 
     private Class<P> determinePlaceholdersClass() {
-      for (Type interfaceType : this.replacer.getClass().getGenericInterfaces()) {
-        if (interfaceType instanceof ParameterizedType type && type.getRawType() == PlaceholderReplacer.class) {
-          Type placeholderType = type.getActualTypeArguments()[1];
-          return placeholderType instanceof Class<?> clazz ? (Class<P>) clazz : (Class<P>) ((ParameterizedType) placeholderType).getRawType();
-        }
-      }
-
-      throw new IllegalStateException();
+      return (Class<P>) GenericUtils.unwrapClassParameterizedType(GenericUtils.getParameterType(PlaceholderReplacer.class, this.replacer.getClass(), 1));
     }
 
     private void setPlaceholders(String[] placeholders, boolean wrapWithBraces) {
-      this.placeholders = (P[]) Array.newInstance(this.placeholdersClass, placeholders.length);
+      P[] transformed = (P[]) Array.newInstance(this.placeholdersClass, placeholders.length);
       for (int i = placeholders.length - 1; i >= 0; --i) {
         String placeholder = placeholders[i];
-        this.placeholders[i] = this.replacer.transformPlaceholder(wrapWithBraces && (placeholder.charAt(0) != '{' || placeholder.charAt(placeholder.length() - 1) != '}')
+        if (placeholder.isEmpty()) {
+          throw new IllegalArgumentException("Placeholder must not be empty");
+        }
+        transformed[i] = this.replacer.transformPlaceholder(wrapWithBraces && (placeholder.charAt(0) != '{' || placeholder.charAt(placeholder.length() - 1) != '}')
             ? '{' + placeholder + '}'
             : placeholder
         );
       }
+      this.placeholders = transformed;
     }
   }
 }

@@ -1,0 +1,1 @@
+Names{firstValue=String(renamed);overrideName=String(override);fallbackValue=String(canonical);version2Value=Integer(42);finalValue=String(fixed);annotatedFinal=String(fixed too);ignoredValue=String(ignored);annotatedIgnored=String(ignored too);}

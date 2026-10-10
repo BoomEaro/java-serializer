@@ -8,3 +8,6 @@
 *.bat           text eol=crlf
 
 *.yml           text eol=lf
+
+# Keep byte-for-byte legacy fixtures stable across Windows and Unix checkouts.
+/src/test/resources/compatibility/** text eol=lf

@@ -10,11 +10,17 @@ plugins() {
 this.group = "net.elytrium"
 this.version = "1.2.0"
 
-compileJava() {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+    withJavadocJar()
+}
 
-    options.setEncoding("UTF-8")
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release = 21
 }
 
 repositories() {
@@ -22,15 +28,15 @@ repositories() {
 }
 
 dependencies() {
-    annotationProcessor("net.java.dev.jna:jna-platform:5.13.0")
-
     compileOnly("org.jetbrains:annotations:26.1.0")
 
     testImplementation("it.unimi.dsi:fastutil-core:8.5.12")
+    testImplementation("org.yaml:snakeyaml:2.7")
+    testImplementation("com.fasterxml.jackson.core:jackson-core:2.22.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api:$junitVersion")
-    testImplementation("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
-    testImplementation("org.junit.platform:junit-platform-launcher:$junitVersion")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:$junitVersion")
 }
 
 test() {
@@ -46,30 +52,11 @@ checkstyle() {
     maxWarnings = 0
 }
 
-tasks.register("sourcesJar", Jar) {
-    archiveClassifier = "sources"
-    from(sourceSets.main.getAllSource())
-}
-
-tasks.register("javadocJar", Jar) {
-    archiveClassifier = "javadoc"
-    from(javadoc)
-}
-
 javadoc() {
     options.setEncoding("UTF-8")
     options.setSource("21")
     options.links("https://docs.oracle.com/en/java/javase/21/docs/api/")
     options.addStringOption("Xdoclint:none", "-quiet")
-    if (JavaVersion.current() >= JavaVersion.VERSION_1_9 && JavaVersion.current() < JavaVersion.VERSION_12) {
-        options.addBooleanOption("-no-module-directories", true)
-    }
-}
-
-artifacts() {
-    archives(sourcesJar)
-    archives(javadocJar)
-    archives(jar)
 }
 
 publishing() {
@@ -91,7 +78,7 @@ publishing() {
             }
 
             name = "ossrh-repo"
-            url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+            url = "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
         }
     }
 
@@ -120,15 +107,40 @@ publishing() {
             }
         }
 
-        artifact(sourcesJar)
-        artifact(javadocJar)
-        artifact(jar)
+        from(components.java)
     }
 }
 
 signing() {
     if (rootProject.hasProperty("signing.keyId")) {
         sign(publishing.publications.publication)
-        sign(configurations.archives)
+    }
+}
+
+// Transfer a completed Maven upload to the Portal for manual review and release.
+tasks.register("stageCentralPublication") {
+    group = "publishing"
+    description = "Upload the publication and transfer it to Central Portal without releasing it."
+    dependsOn("publishPublicationPublicationToOssrh-repoRepository")
+    doLast {
+        def username = System.getenv("ELYTRIUM_OSSRH_USERNAME")
+        def password = System.getenv("ELYTRIUM_OSSRH_PASSWORD")
+        if (!username || !password) {
+            throw new GradleException("Central Portal token credentials are required in ELYTRIUM_OSSRH_USERNAME/PASSWORD")
+        }
+        def namespace = providers.gradleProperty("centralNamespace").getOrElse(project.group.toString())
+        def encodedNamespace = java.net.URLEncoder.encode(namespace, java.nio.charset.StandardCharsets.UTF_8)
+        def token = java.util.Base64.encoder.encodeToString("${username}:${password}".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        def request = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create("https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/${encodedNamespace}?publishing_type=user_managed"))
+            .timeout(java.time.Duration.ofMinutes(2))
+            .header("Authorization", "Bearer " + token)
+            .POST(java.net.http.HttpRequest.BodyPublishers.noBody())
+            .build()
+        def response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding())
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new GradleException("Central Portal transfer failed with HTTP " + response.statusCode())
+        }
+        logger.lifecycle("Publication transferred to https://central.sonatype.com/publishing for manual review and release.")
     }
 }

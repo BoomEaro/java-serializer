@@ -21,12 +21,18 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.Comment;
 import net.elytrium.serializer.annotations.CommentValue;
+import net.elytrium.serializer.annotations.FallbackNodeNames;
 import net.elytrium.serializer.annotations.NewLine;
 import net.elytrium.serializer.annotations.OverrideNameStyle;
 import net.elytrium.serializer.annotations.Serializer;
@@ -61,18 +67,34 @@ public abstract class AbstractWriter {
 
   public void writeSerializableObject(@Nullable Field owner, Object value, Class<?> clazz) {
     synchronized (this) {
+      Field[] fields = clazz.getDeclaredFields();
+      Map<Field, String> nodeNames = new HashMap<>();
+      Map<String, Field> visibleNames = new HashMap<>();
+      for (Field field : fields) {
+        if (this.isFieldVisible(field)) {
+          String nodeName = this.getNodeName(field);
+          this.registerNodeName(visibleNames, nodeName, field);
+          FallbackNodeNames aliases = field.getAnnotation(FallbackNodeNames.class);
+          if (aliases != null) {
+            for (String alias : aliases.value()) {
+              this.registerNodeName(visibleNames, alias, field);
+            }
+          }
+          nodeNames.put(field, nodeName);
+        }
+      }
+
       boolean first = false;
       if (this.first) {
         first = true;
         this.first = false;
       }
 
-      Field[] fields = clazz.getDeclaredFields();
       boolean empty = true;
       int counter = 0;
       int lastVisibleFieldIndex = 0;
       for (int i = fields.length - 1; i >= 0; --i) {
-        if (this.isFieldVisible(fields[i])) {
+        if (nodeNames.containsKey(fields[i])) {
           lastVisibleFieldIndex = i + 1;
           break;
         }
@@ -80,7 +102,7 @@ public abstract class AbstractWriter {
 
       for (Field field : fields) {
         ++counter;
-        if (this.isFieldVisible(field)) {
+        if (nodeNames.containsKey(field)) {
           try {
             NewLine newLines = field.getAnnotation(NewLine.class);
             if (newLines == null) {
@@ -95,25 +117,7 @@ public abstract class AbstractWriter {
               this.writeLine();
             }
 
-            Object nodeValue = field.get(value);
-            Serializer serializer = field.getAnnotation(Serializer.class);
-            if (serializer == null) {
-              serializer = field.getType().getAnnotation(Serializer.class);
-            }
-
-            if (serializer != null) {
-              nodeValue = this.config.getAndCacheSerializer(serializer).serialize(nodeValue);
-            }
-
-            if (nodeValue != null) {
-              nodeValue = this.serializeValue(nodeValue);
-            }
-
-            OverrideNameStyle overrideNameStyle = field.getAnnotation(OverrideNameStyle.class);
-            if (overrideNameStyle == null) {
-              overrideNameStyle = field.getType().getAnnotation(OverrideNameStyle.class);
-            }
-
+            final Object nodeValue = field.get(value);
             if (empty) {
               empty = false;
               this.writeBeginMap(owner);
@@ -132,7 +136,7 @@ public abstract class AbstractWriter {
 
             this.writeMapEntry(
                 field,
-                overrideNameStyle == null ? this.config.toNodeName(field.getName()) : this.config.toNodeName(field.getName(), overrideNameStyle.field(), overrideNameStyle.node()),
+                nodeNames.get(field),
                 nodeValue,
                 counter != lastVisibleFieldIndex,
                 comments
@@ -155,6 +159,22 @@ public abstract class AbstractWriter {
     }
   }
 
+  private void registerNodeName(Map<String, Field> fields, String name, Field field) {
+    Field previous = fields.putIfAbsent(name, field);
+    if (previous != null && !previous.equals(field)) {
+      throw new IllegalArgumentException("Fields " + previous + " and " + field + " collide at node name: " + name);
+    }
+  }
+
+  private String getNodeName(Field field) {
+    OverrideNameStyle overrideNameStyle = field.getAnnotation(OverrideNameStyle.class);
+    if (overrideNameStyle == null) {
+      overrideNameStyle = field.getType().getAnnotation(OverrideNameStyle.class);
+    }
+    return overrideNameStyle == null ? this.config.toNodeName(field.getName())
+        : this.config.toNodeName(field.getName(), overrideNameStyle.field(), overrideNameStyle.node());
+  }
+
   private boolean isFieldVisible(Field field) {
     try {
       field.setAccessible(true);
@@ -166,13 +186,51 @@ public abstract class AbstractWriter {
     return !Modifier.isStatic(modifiers) && !Modifier.isTransient(modifiers) && field.getAnnotation(Transient.class) == null && field.getType().getAnnotation(Transient.class) == null;
   }
 
-  private Object serializeValue(Object nodeValue) {
-    ClassSerializer<Object, ?> classSerializer;
-    while ((classSerializer = this.config.getRegisteredSerializer(nodeValue.getClass())) != null) {
-      nodeValue = classSerializer.serialize(nodeValue);
-      if (classSerializer.getToType().equals(classSerializer.getFromType())) {
+  private Object serializeValue(@Nullable Field owner, Object nodeValue) {
+    if (nodeValue == null) {
+      return null;
+    }
+    Set<ClassSerializer<?, ?>> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+    Set<Type> visitedTypes = new HashSet<>();
+    ClassSerializer<Object, ?> classSerializer = null;
+    Serializer annotation = owner == null ? null : owner.getAnnotation(Serializer.class);
+    if (annotation == null) {
+      Class<?> annotatedClass = owner == null
+          ? nodeValue instanceof Enum<?> enumValue ? enumValue.getDeclaringClass() : nodeValue.getClass()
+          : owner.getType();
+      annotation = annotatedClass.getAnnotation(Serializer.class);
+    }
+    if (annotation != null) {
+      try {
+        classSerializer = this.config.getAndCacheSerializer(annotation);
+      } catch (ReflectiveOperationException e) {
+        throw new ReflectionException(e);
+      }
+    }
+    boolean initialStage = true;
+    while (nodeValue != null) {
+      if (classSerializer == null) {
+        Class<?> lookupClass = initialStage && owner != null && owner.getType().isPrimitive() ? owner.getType() : nodeValue.getClass();
+        classSerializer = this.config.getRegisteredSerializer(lookupClass);
+      }
+      if (classSerializer == null) {
         break;
       }
+      if (!visited.add(classSerializer)) {
+        // Its wire type inherited a broader registration, e.g. Object -> String.
+        break;
+      }
+      visitedTypes.add(classSerializer.getToType());
+      nodeValue = classSerializer.serialize(nodeValue);
+      // Registry lookup uses raw classes, so a same-raw generic conversion is a terminal stage too.
+      if (classSerializer.getToClass().equals(classSerializer.getFromClass())) {
+        break;
+      }
+      if (!visitedTypes.add(classSerializer.getFromType())) {
+        throw new IllegalStateException("Cyclic serializer chain at " + classSerializer.getClass().getName());
+      }
+      classSerializer = null;
+      initialStage = false;
     }
 
     return nodeValue;
@@ -183,20 +241,39 @@ public abstract class AbstractWriter {
   }
 
   public void writeMapEntry(@Nullable Field owner, String nodeName, Object node, boolean shouldJoin, Comment[] comments) {
+    this.writeMapEntry0(owner, nodeName, node, shouldJoin, comments);
+  }
+
+  private void writeMapEntry0(@Nullable Field owner, Object key, Object node, boolean shouldJoin, Comment[] comments) {
     synchronized (this) {
       this.writeComments(owner, comments, Comment.At.PREPEND, true);
-      this.writeNodeName(owner, nodeName);
-      this.writeNode(owner, node, null);
+      this.writeMapKey(owner, key);
+      boolean commentsWritten = this.writeNodeWithComments(owner, node, comments);
       if (shouldJoin) {
         this.writeMapPreCommentEntryJoin(owner);
       }
-      this.writeComments(owner, comments, Comment.At.SAME_LINE, true);
+      if (!commentsWritten) {
+        this.writeComments(owner, comments, Comment.At.SAME_LINE, true);
+      }
       if (shouldJoin) {
         this.writeMapPostCommentEntryJoin(owner);
       }
       this.writeMapEntryEnd(owner);
       this.writeComments(owner, comments, Comment.At.APPEND, shouldJoin);
     }
+  }
+
+  protected void writeMapKey(@Nullable Field owner, Object key) {
+    this.writeNodeName(owner, String.valueOf(key));
+  }
+
+  protected String getMapKeyIdentity(Object key) {
+    return String.valueOf(key);
+  }
+
+  protected boolean writeNodeWithComments(@Nullable Field owner, Object value, Comment[] comments) {
+    this.writeNode(owner, value, null);
+    return false;
   }
 
   public void writeComments(Comment[] comments, Comment.At currentPosition, boolean shouldJoin) {
@@ -286,10 +363,10 @@ public abstract class AbstractWriter {
   @SuppressWarnings("unchecked")
   public void writeNode(@Nullable Field owner, Object value, Comment[] comments) {
     synchronized (this) {
+      value = this.serializeValue(owner, value);
       if (value == null) {
         this.writeRaw("null");
       } else {
-        value = this.serializeValue(value);
         if (value instanceof Map) {
           this.writeMap(owner, (Map<Object, Object>) value, comments);
         } else if (value instanceof Collection<?>) {
@@ -300,8 +377,10 @@ public abstract class AbstractWriter {
           this.writeCharacter(owner, (Character) value);
         } else if (value instanceof Enum) {
           this.writeEnum(owner, (Enum<?>) value);
-        } else if (value instanceof Boolean || value instanceof Number || value.getClass().isPrimitive()) {
-          this.writeRaw(value.toString());
+        } else if (value instanceof Boolean) {
+          this.writeBoolean(owner, (Boolean) value);
+        } else if (value instanceof Number) {
+          this.writeNumber(owner, (Number) value);
         } else {
           this.writeSerializableObject(owner, value, value.getClass());
         }
@@ -315,6 +394,7 @@ public abstract class AbstractWriter {
 
   public void writeMap(@Nullable Field owner, Map<Object, Object> value, Comment[] comments) {
     synchronized (this) {
+      this.first = false;
       if (value.isEmpty()) {
         this.writeEmptyMap(owner);
         this.writeComments(owner, comments, Comment.At.SAME_LINE, true);
@@ -323,10 +403,15 @@ public abstract class AbstractWriter {
         this.writeComments(owner, comments, Comment.At.SAME_LINE, true);
 
         Set<Map.Entry<Object, Object>> entries = value.entrySet();
+        Set<String> writtenKeys = new HashSet<>();
         int counter = 0;
         int entriesAmount = entries.size();
         for (Map.Entry<Object, Object> entry : entries) {
-          this.writeMapEntry(null, entry.getKey().toString(), entry.getValue(), ++counter != entriesAmount, null);
+          Object key = this.serializeValue(null, entry.getKey());
+          if (!writtenKeys.add(this.getMapKeyIdentity(key))) {
+            throw new IllegalArgumentException("Map keys collide after serialization: " + key);
+          }
+          this.writeMapEntry0(null, key, entry.getValue(), ++counter != entriesAmount, null);
         }
 
         this.writeEndMap(owner);
@@ -376,6 +461,7 @@ public abstract class AbstractWriter {
 
   public void writeCollection(@Nullable Field owner, Collection<Object> value, Comment[] comments) {
     synchronized (this) {
+      this.first = false;
       if (value.isEmpty()) {
         this.writeEmptyCollection(owner);
         this.writeComments(owner, comments, Comment.At.SAME_LINE, true);

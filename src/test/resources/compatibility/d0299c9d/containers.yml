@@ -1,0 +1,30 @@
+labels:
+  - "one"
+  - "two"
+  - "three"
+numbers:
+  - 10
+  - -20
+  - 30
+rows:
+  - name: "alpha"
+    count: 11
+  - name: "beta"
+    count: 22
+grouped:
+  first:
+    - 1
+    - 2
+  second:
+    - 3
+    - 4
+by-id:
+  7:
+    name: "seven"
+    count: 77
+  8:
+    name: "eight"
+    count: 88
+child:
+  name: "nested"
+  count: 33

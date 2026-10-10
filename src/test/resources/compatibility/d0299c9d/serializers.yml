@@ -1,0 +1,5 @@
+token: "wire:direct"
+tokens:
+  - "wire:first"
+  - "wire:second"
+subtype: "base:subtype"

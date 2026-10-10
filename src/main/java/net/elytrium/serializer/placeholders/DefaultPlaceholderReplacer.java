@@ -21,6 +21,11 @@ public class DefaultPlaceholderReplacer implements PlaceholderReplacer<String, S
 
   @Override
   public String replace(String value, String[] placeholders, Object... values) {
+    for (String placeholder : placeholders) {
+      if (placeholder.isEmpty()) {
+        throw new IllegalArgumentException("Placeholder must not be empty");
+      }
+    }
     return switch (placeholders.length) {
       case 0 -> value;
       case 1 -> values.length == 0 || value.isEmpty() ? value : value.replace(placeholders[0], String.valueOf(values[0]));
@@ -36,6 +41,10 @@ public class DefaultPlaceholderReplacer implements PlaceholderReplacer<String, S
     // make sure lengths are ok, these need to be equal
     if (searchLength != replacementLength) {
       throw new IllegalArgumentException("Search and Replace array lengths don't match: " + searchLength + " vs " + replacementLength);
+    }
+    String[] replacements = new String[replacementLength];
+    for (int i = 0; i < replacementLength; i++) {
+      replacements[i] = String.valueOf(replacementList[i]);
     }
 
     // keep track of which still have matches
@@ -77,12 +86,7 @@ public class DefaultPlaceholderReplacer implements PlaceholderReplacer<String, S
 
     // count the replacement text elements that are larger than their corresponding text being replaced
     for (int i = 0; i < searchList.length; ++i) {
-      // Make sure all arguments are strings.
-      if (!(replacementList[i] instanceof String)) {
-        replacementList[i] = String.valueOf(replacementList[i]); // Using String.valueOf() instead of toString() allows the array to contain null.
-      }
-
-      final int greater = ((String) replacementList[i]).length() - searchList[i].length();
+      final int greater = replacements[i].length() - searchList[i].length();
       if (greater > 0) {
         increase += 3 * greater; // assume 3 matches
       }
@@ -97,7 +101,7 @@ public class DefaultPlaceholderReplacer implements PlaceholderReplacer<String, S
         buf.append(text.charAt(i));
       }
 
-      buf.append((String) replacementList[replaceIndex]);
+      buf.append(replacements[replaceIndex]);
 
       start = textIndex + searchList[replaceIndex].length();
 

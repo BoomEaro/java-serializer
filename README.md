@@ -6,10 +6,12 @@
 
 Java Library to (de-)serialize data in various formats (e.g. JSON, YAML)
 
+Requires Java 21 or newer. The Gradle build uses a Java 21 toolchain.
+
 ## Features of Elytrium Java Serializer
 
 - Zero dependencies
-- Serialize any class without any modifications
+- Serialize supported POJOs without annotations or a base class
 - Auto replacer of placeholders
 - Ability to add comments and new lines to the fields
 
@@ -48,14 +50,16 @@ Elytrium Java Serializer is uploaded to the Maven Central repository, so you can
 2) Create YamlWriter
     ```java
     Settings settings = new Settings();
-    YamlWriter writer = new YamlWriter(Files.newBufferedWriter(Path.of("config.yml")));
-    writer.writeNode(settings, null);
+    try (BufferedWriter output = Files.newBufferedWriter(Path.of("config.yml"))) {
+      new YamlWriter(output).writeNode(settings, null);
+    }
     ```
 3) Create YamlReader
     ```java
     Settings settings = new Settings();
-    YamlReader reader = new YamlReader(Files.newBufferedReader(Path.of("config.yml")));
-    reader.readSerializableObject(settings, Settings.class);
+    try (BufferedReader input = Files.newBufferedReader(Path.of("config.yml"))) {
+      new YamlReader(input).readSerializableObject(settings, Settings.class);
+    }
    ```
 
 ### With some modifications
@@ -141,7 +145,7 @@ Placeholders.replace will work even with custom placeholder.
 
 
 ```java
-  public class StringPlaceholderReplacer implements PlaceholderReplacer<String> {
+  public class StringPlaceholderReplacer implements PlaceholderReplacer<String, String> {
 
     @Override
     public String replace(String value, String[] placeholders, Object... values) {
@@ -245,6 +249,23 @@ In case if you can't add @Serializer annotation or if you have multiple entries 
     }
   }).build();
 ```
+
+## Format and lifecycle contracts
+
+- YAML supports mappings, sequences, quoted strings and literal/folded block strings. It is not a complete YAML 1.2 implementation: anchors, aliases, tags and multiple documents are not supported.
+- JSON output uses JSON strings, keys and finite numbers. `NaN` and infinities are rejected. Comments remain an optional extension; output containing comments requires a reader that supports them.
+- POJO support covers fields declared in the concrete class. Inherited fields, generic POJOs and arrays are not part of the supported model; use a custom serializer for these types. Recursive object graphs are not supported.
+- Visible POJO field names must remain unique after name conversion; read aliases must not refer to different visible fields. Ambiguous names are rejected. Boolean values must be `true` or `false` (case-insensitive), and Character values must decode to exactly one Java character.
+- Untyped `Object` values resolve plain `true`/`false` to Boolean, integers to Long and decimal numbers to Double; quoted values remain strings. Applications upgrading from older versions should check code that expected untyped booleans to be strings.
+- Registered serializers prefer the exact requested class, then its primitive/wrapper counterpart, then the class hierarchy. Primitive fields use their declared primitive class for the first conversion, so separate `int.class` and `Integer.class` registrations remain distinct.
+- `load`/`reload` roll back field assignments on parsing failure. Side effects inside user-provided converters are the caller's responsibility. Use one thread per mutable configuration object; thread-safe extension caching does not make arbitrary converters thread-safe.
+- Reader and writer objects do not close caller-owned streams. Close streams with try-with-resources as shown above.
+- Prefer the object overloads of `Placeholders`: registrations use weak object identity and are cleaned on later registry access after the holder is collected. Deprecated integer overloads use a separate, manually managed registry; they cannot distinguish identity-hash collisions. Register one placeholder specification per object, or use a distinct holder with `replaceFor` when the same value needs different specifications.
+
+## Building 
+
+Run `./gradlew build` with a Java 21 JDK installed.
+
 
 ## Support
 

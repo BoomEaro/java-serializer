@@ -1,0 +1,1 @@
+Styles{single=String(it's quoted);doubleQuoted=String(double "quoted");literal=String(first line\nsecond line);folded=String(first line\nsecond line);}

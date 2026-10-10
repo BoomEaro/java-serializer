@@ -37,6 +37,12 @@ public class JsonWriter extends YamlWriter {
   }
 
   @Override
+  public void writeComment(@Nullable Field owner, Comment comment, boolean shouldJoin) {
+    // JSON closing delimiters must never share a line with an APPEND line comment.
+    super.writeComment(owner, comment, shouldJoin || comment.at() == Comment.At.APPEND);
+  }
+
+  @Override
   public void writeCommentStart(@Nullable Field owner, Comment.At at) {
     synchronized (this) {
       if (at != Comment.At.SAME_LINE) {
@@ -60,10 +66,69 @@ public class JsonWriter extends YamlWriter {
   public void writeNodeName(@Nullable Field owner, String nodeName) {
     synchronized (this) {
       this.writeIndent();
-      this.writeRaw('"');
-      this.writeRaw(nodeName);
-      this.writeRaw("\": ");
+      this.writeString(owner, nodeName);
+      this.writeRaw(": ");
     }
+  }
+
+  @Override
+  protected void writeMapKey(@Nullable Field owner, Object key) {
+    this.writeNodeName(owner, String.valueOf(key));
+  }
+
+  @Override
+  protected String getMapKeyIdentity(Object key) {
+    return String.valueOf(key);
+  }
+
+  @Override
+  public void writeString(@Nullable Field owner, String value) {
+    synchronized (this) {
+      this.writeRaw('"');
+      for (int i = 0; i < value.length(); ++i) {
+        char character = value.charAt(i);
+        switch (character) {
+          case '"' -> this.writeRaw("\\\"");
+          case '\\' -> this.writeRaw("\\\\");
+          case '\b' -> this.writeRaw("\\b");
+          case '\f' -> this.writeRaw("\\f");
+          case '\n' -> this.writeRaw("\\n");
+          case '\r' -> this.writeRaw("\\r");
+          case '\t' -> this.writeRaw("\\t");
+          default -> {
+            if (character < 0x20 || Character.isSurrogate(character)) {
+              String hex = "000" + Integer.toHexString(character);
+              this.writeRaw("\\u" + hex.substring(hex.length() - 4));
+            } else {
+              this.writeRaw(character);
+            }
+          }
+        }
+      }
+      this.writeRaw('"');
+    }
+  }
+
+  @Override
+  public void writeCharacter(@Nullable Field owner, char value) {
+    this.writeString(owner, String.valueOf(value));
+  }
+
+  @Override
+  public void writeEnum(@Nullable Field owner, Enum<?> value) {
+    this.writeString(owner, value.name());
+  }
+
+  /**
+   * Writes a JSON number, rejecting NaN and infinity because JSON has no representation for them.
+   */
+  @Override
+  public void writeNumber(@Nullable Field owner, Number value) {
+    if ((value instanceof Double && !Double.isFinite(value.doubleValue()))
+        || (value instanceof Float && !Float.isFinite(value.floatValue()))) {
+      throw new IllegalArgumentException("JSON numbers must be finite: " + value);
+    }
+    super.writeNumber(owner, value);
   }
 
   @Override

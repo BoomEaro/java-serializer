@@ -36,6 +36,10 @@ public class YamlWriter extends AbstractWriter {
   private String singleIndent = "  ";
   private String currentIndent = "";
   private boolean waitingForEntryValue;
+  private boolean blockLineEnded;
+  private Comment[] pendingBlockComments;
+  private Field pendingBlockOwner;
+  private boolean blockCommentsWritten;
 
   public YamlWriter(SerializerConfig config, BufferedWriter writer) {
     super(config, writer);
@@ -87,6 +91,40 @@ public class YamlWriter extends AbstractWriter {
     synchronized (this) {
       this.writeIndent();
       this.writeString0(owner, value, true);
+    }
+  }
+
+  @Override
+  protected void writeMapKey(@Nullable Field owner, Object key) {
+    if (key == null || key instanceof Number || key instanceof Boolean) {
+      this.writeIndent();
+      this.writeRaw(String.valueOf(key));
+      this.writeRaw(':');
+      this.waitingForEntryValue = true;
+    } else {
+      this.writeNodeName(owner, String.valueOf(key));
+    }
+  }
+
+  @Override
+  protected String getMapKeyIdentity(Object key) {
+    if (key == null) {
+      return "null:";
+    } else if (key instanceof Number) {
+      // Match the scalar categories used by untyped reads, including signed floating-point zero.
+      try {
+        return "integer:" + Long.parseLong(key.toString());
+      } catch (NumberFormatException e) {
+        double number = Double.parseDouble(key.toString());
+        if (!Double.isFinite(number)) {
+          throw new IllegalArgumentException("Nonfinite YAML map keys are not supported: " + key);
+        }
+        return "float:" + number;
+      }
+    } else if (key instanceof Boolean) {
+      return "boolean:" + key;
+    } else {
+      return "string:" + key;
     }
   }
 
@@ -183,21 +221,39 @@ public class YamlWriter extends AbstractWriter {
   @Override
   public void writeCharacter(@Nullable Field owner, char value) {
     synchronized (this) {
-      boolean shouldUseQuotes = YamlWriter.shouldUseQuotes(value, true, false);
-      if (shouldUseQuotes) {
-        this.writeRaw('"');
-      }
+      this.writeRaw('"');
       this.writeCharacter0(value, true);
-      if (shouldUseQuotes) {
-        this.writeRaw('"');
-      }
+      this.writeRaw('"');
     }
   }
 
   @Override
   public void writeLine() {
     synchronized (this) {
-      super.writeRaw(this.config.getLineSeparator());
+      this.unsetTempDisableNewLine();
+      if (this.blockLineEnded) {
+        this.blockLineEnded = false;
+      } else {
+        super.writeRaw(this.config.getLineSeparator());
+      }
+    }
+  }
+
+  @Override
+  protected boolean writeNodeWithComments(@Nullable Field owner, Object value, Comment[] comments) {
+    Comment[] previousComments = this.pendingBlockComments;
+    Field previousOwner = this.pendingBlockOwner;
+    boolean previousWritten = this.blockCommentsWritten;
+    this.pendingBlockComments = comments;
+    this.pendingBlockOwner = owner;
+    this.blockCommentsWritten = false;
+    try {
+      this.writeNode(owner, value, null);
+      return this.blockCommentsWritten;
+    } finally {
+      this.pendingBlockComments = previousComments;
+      this.pendingBlockOwner = previousOwner;
+      this.blockCommentsWritten = previousWritten;
     }
   }
 
@@ -212,7 +268,7 @@ public class YamlWriter extends AbstractWriter {
     } else {
       StringStyle style = null;
       if (nodeName) {
-        style = StringStyle.NOT_QUOTED;
+        style = YamlWriter.isPlainString(value) ? StringStyle.NOT_QUOTED : StringStyle.DOUBLE_QUOTED;
       } else {
         YamlStringStyle styleAnnotation = null;
         if (owner != null) {
@@ -242,6 +298,110 @@ public class YamlWriter extends AbstractWriter {
         this.waitingForEntryValue = true;
       }
     }
+  }
+
+  private void writeBlockString(String value, boolean folded, boolean stripped, boolean kept) {
+    int contentEnd = value.length();
+    while (contentEnd > 0 && value.charAt(contentEnd - 1) == '\n') {
+      --contentEnd;
+    }
+    int trailingLines = value.length() - contentEnd;
+    if (stripped && trailingLines != 0) {
+      throw new IllegalStateException("This string type can't contain new lines at the end");
+    }
+
+    // A block cannot represent CR/control characters without YAML normalizing them.
+    if (this.singleIndent.isEmpty() || this.singleIndent.length() > 9 || !this.singleIndent.isBlank()
+        || this.singleIndent.indexOf('\t') != -1 || !YamlWriter.isBlockString(value)) {
+      StringStyle.DOUBLE_QUOTED.write(this, value);
+      return;
+    }
+
+    this.writeRaw(folded ? '>' : '|');
+    if (trailingLines == 0) {
+      this.writeRaw('-');
+    } else if (kept || trailingLines > 1 || contentEnd == 0) {
+      this.writeRaw('+');
+    }
+    // Chomping first also works with legacy readers; explicit indentation preserves leading spaces.
+    this.writeRaw(Character.forDigit(this.singleIndent.length(), 10));
+    this.writeComments(this.pendingBlockOwner, this.pendingBlockComments, Comment.At.SAME_LINE, true);
+    this.blockCommentsWritten = true;
+    this.unsetTempDisableNewLine();
+    this.addIndent();
+    this.writeLineAndIndent();
+
+    int offset = 0;
+    while (offset < contentEnd) {
+      int lineEnd = value.indexOf('\n', offset);
+      if (lineEnd == -1 || lineEnd >= contentEnd) {
+        this.writeRaw(value.substring(offset, contentEnd));
+        break;
+      }
+      this.writeRaw(value.substring(offset, lineEnd));
+      int nextLine = lineEnd;
+      while (nextLine < contentEnd && value.charAt(nextLine) == '\n') {
+        ++nextLine;
+      }
+      int physicalLines = nextLine - lineEnd;
+      if (folded && lineEnd > offset && !YamlWriter.isIndented(value.charAt(offset))
+          && !YamlWriter.isIndented(value.charAt(nextLine))) {
+        ++physicalLines;
+      }
+      for (int i = 0; i < physicalLines; ++i) {
+        this.writeLineAndIndent();
+      }
+      offset = nextLine;
+    }
+
+    // Finish the scalar now; its parent's next separator reuses this final physical line break.
+    int physicalTrailingLines = Math.max(1, trailingLines);
+    for (int i = 0; i < physicalTrailingLines; ++i) {
+      this.writeLine();
+    }
+    this.removeIndent();
+    this.blockLineEnded = true;
+  }
+
+  private static boolean isIndented(char value) {
+    return value == ' ' || value == '\t';
+  }
+
+  private static boolean requiresEscapedLineBreaks(String value) {
+    for (int i = 0; i < value.length(); ++i) {
+      char character = value.charAt(i);
+      // Flow scalars normalize CR and strip whitespace around physical line breaks.
+      // Edge and repeated newlines also fold differently from a break between text lines.
+      if (character == '\r' || (character == '\n' && (i == 0 || i == value.length() - 1
+          || value.charAt(i - 1) == '\n' || value.charAt(i + 1) == '\n'
+          || YamlWriter.isIndented(value.charAt(i - 1)) || YamlWriter.isIndented(value.charAt(i + 1))))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isBlockString(String value) {
+    for (int i = 0; i < value.length();) {
+      int character = value.codePointAt(i);
+      if (!YamlWriter.isYamlPrintable(character) || character == '\r' || character == '\u0085'
+          || character == '\u2028' || character == '\u2029') {
+        return false;
+      }
+      i += Character.charCount(character);
+    }
+    return true;
+  }
+
+  private static boolean isYamlPrintable(int value) {
+    return value == '\t' || value == '\n' || value == '\r' || value == 0x85
+        || value >= 0x20 && value <= 0x7E || value >= 0xA0 && value <= 0xD7FF
+        || value >= 0xE000 && value <= 0xFFFD || value >= 0x10000 && value <= 0x10FFFF;
+  }
+
+  private static boolean isPlainString(String value) {
+    return value.matches("[a-zA-Z_][a-zA-Z0-9_.-]*")
+        && !value.matches("(?i:null|true|false|yes|no|on|off)");
   }
 
   private void writeCharacters(char[] characters) {
@@ -302,6 +462,12 @@ public class YamlWriter extends AbstractWriter {
     this.removeIndent();
   }
 
+  private void writeDoubleQuotedString(String value) {
+    this.writeRaw('"');
+    this.writeCharacters(value.toCharArray(), false, false, true, true, true);
+    this.writeRaw('"');
+  }
+
   private void writeCharacter0(int value, boolean escapeSpecial) {
     switch (value) {
       case '\0' -> this.writeRaw("\\0");
@@ -326,7 +492,7 @@ public class YamlWriter extends AbstractWriter {
         }
       }
       default -> {
-        if (Character.isIdentifierIgnorable(value) && !this.config.isAllowUnicode()) {
+        if (!YamlWriter.isYamlPrintable(value) || Character.isIdentifierIgnorable(value) && !this.config.isAllowUnicode()) {
           if (value <= 0xFF) {
             this.writeRaw("\\x");
             String result = "0" + Integer.toString(value, 16);
@@ -396,6 +562,9 @@ public class YamlWriter extends AbstractWriter {
 
   @Override
   public void writeRaw(String value) {
+    if (!value.isEmpty()) {
+      this.blockLineEnded = false;
+    }
     if (this.waitingForEntryValue) {
       this.waitingForEntryValue = false;
       super.writeRaw(' ');
@@ -406,6 +575,7 @@ public class YamlWriter extends AbstractWriter {
 
   @Override
   public void writeRaw(char value) {
+    this.blockLineEnded = false;
     if (this.waitingForEntryValue) {
       this.waitingForEntryValue = false;
       super.writeRaw(' ');
@@ -432,7 +602,8 @@ public class YamlWriter extends AbstractWriter {
     return (avoidSpecial && (value == ' ' || value == '#' || value == '"'))
            || (!ignoreSingleQuotes && value == '\'')
            || value == '\0' || value == '\u0007' || value == '\b' || value == '\t' || value == '\n' || value == '\u000B' || value == '\f' || value == '\r'
-           || value == '\u001B' || value == '\\' || value == '\u0085' || value == '\u00A0' || value == '\u2028' || value == '\u2029';
+           || value == '\u001B' || value == '\\' || value == '\u0085' || value == '\u00A0' || value == '\u2028' || value == '\u2029'
+           || !YamlWriter.isYamlPrintable(value) && !Character.isSurrogate(value);
   }
 
   public enum StringStyle {
@@ -443,7 +614,7 @@ public class YamlWriter extends AbstractWriter {
      */
     NOT_QUOTED((writer, string) -> {
       char[] characters = string.toCharArray();
-      boolean shouldUseQuotes = YamlWriter.shouldUseQuotes(characters, true, false);
+      boolean shouldUseQuotes = !YamlWriter.isPlainString(string);
 
       if (shouldUseQuotes) {
         writer.writeRaw('"');
@@ -460,24 +631,31 @@ public class YamlWriter extends AbstractWriter {
      * but {@code "} will be used if special character was found
      */
     SINGLE_QUOTED((writer, string) -> {
+      if (YamlWriter.requiresEscapedLineBreaks(string)) {
+        writer.writeDoubleQuotedString(string);
+        return;
+      }
       char[] characters = string.toCharArray();
-      boolean shouldUseQuotes = YamlWriter.shouldUseQuotes(characters, false, true);
+      boolean shouldUseQuotes = YamlWriter.shouldUseQuotes(characters, false, true)
+          || (!writer.config.isAllowUnicode() && string.codePoints().anyMatch(Character::isIdentifierIgnorable));
       writer.writeRaw(shouldUseQuotes ? '"' : '\'');
-      writer.writeCharacters(characters, false, true, false, true, shouldUseQuotes);
+      writer.writeCharacters(characters, false, !shouldUseQuotes, false, true, shouldUseQuotes);
       writer.writeRaw(shouldUseQuotes ? '"' : '\'');
     }),
     /**
      * Preferably single line, line separator will be escaped, quoted with double quote {@code "}.
      */
     DOUBLE_QUOTED((writer, string) -> {
-      writer.writeRaw('"');
-      writer.writeCharacters(string.toCharArray(), false, false, true, true, true);
-      writer.writeRaw('"');
+      writer.writeDoubleQuotedString(string);
     }),
     /**
      * Preferably single line, line separators will make new lines, quoted with double quote {@code "}.
      */
     DOUBLE_QUOTED_MULTILINE((writer, string) -> {
+      if (YamlWriter.requiresEscapedLineBreaks(string)) {
+        writer.writeDoubleQuotedString(string);
+        return;
+      }
       writer.writeRaw('"');
       writer.writeCharacters(string.toCharArray(), false, false, false, true, true);
       writer.writeRaw('"');
@@ -489,27 +667,14 @@ public class YamlWriter extends AbstractWriter {
      * and {@code >+} will be used if multiple new lines were found at the end of the string.
      */
     MULTILINE_FOLDED_AUTO_CLIPPED((writer, string) -> {
-      if (!string.endsWith(writer.config.getLineSeparator())) {
-        writer.writeRaw(">-");
-      } else if (string.endsWith(writer.config.getDoubledLineSeparator())) {
-        writer.writeRaw(">+");
-      } else {
-        writer.writeRaw('>');
-      }
-
-      writer.writeCharacters(string.toCharArray(), true, false, false, true, false);
+      writer.writeBlockString(string, true, false, false);
     }),
     /**
      * Preferably multi line, quoted with {@code >-}, new lines will be replaced with spaces,
      * can't contain new lines at the end. Throws an exception if new line caught at the end.
      */
     MULTILINE_FOLDED_STRIPPED((writer, string) -> {
-      if (string.endsWith(writer.config.getLineSeparator())) {
-        throw new IllegalStateException("This string type can't contain new lines at the end");
-      }
-
-      writer.writeRaw(">-");
-      writer.writeCharacters(string.toCharArray(), true, false, false, true, false);
+      writer.writeBlockString(string, true, true, false);
     }),
     /**
      * Preferably multi line, quoted with {@code >+}, new lines will be replaced with spaces,
@@ -517,43 +682,28 @@ public class YamlWriter extends AbstractWriter {
      * but {@code >-} will be used if new lines were found at the end of the string.
      */
     MULTILINE_FOLDED_AUTO_KEPT((writer, string) -> {
-      writer.writeRaw(string.endsWith(writer.config.getLineSeparator()) ? ">+" : ">-");
-      writer.writeCharacters(string.toCharArray(), true, false, false, true, false);
+      writer.writeBlockString(string, true, false, true);
     }),
     /**
      * Preferably multi line, quoted with {@code |}, single new line at the end will be kept,
      * but {@code |-} will be used if no new lines were found at the end of the string.
      */
     MULTILINE_LITERAL_AUTO_CLIPPED((writer, string) -> {
-      if (!string.endsWith(writer.config.getLineSeparator())) {
-        writer.writeRaw("|-");
-      } else if (string.endsWith(writer.config.getDoubledLineSeparator())) {
-        writer.writeRaw("|+");
-      } else {
-        writer.writeRaw('|');
-      }
-
-      writer.writeCharacters(string.toCharArray(), true, false, false, false, false);
+      writer.writeBlockString(string, false, false, false);
     }),
     /**
      * Preferably multi line, quoted with {@code |},
      * can't contain new lines at the end. Throws an exception if new line caught at the end.
      */
     MULTILINE_LITERAL_STRIPPED((writer, string) -> {
-      if (string.endsWith(writer.config.getLineSeparator())) {
-        throw new IllegalStateException("This string type can't contain new lines at the end");
-      }
-
-      writer.writeRaw("|-");
-      writer.writeCharacters(string.toCharArray(), true, false, false, false, false);
+      writer.writeBlockString(string, false, true, false);
     }),
     /**
      * Preferably multi line, quoted with {@code |+}, all new lines from end will be kept,
      * but {@code |-} will be used if no new lines were found at the end of the string.
      */
     MULTILINE_LITERAL_AUTO_KEPT((writer, string) -> {
-      writer.writeRaw(string.endsWith(writer.config.getLineSeparator()) ? "|+ " : "|- ");
-      writer.writeCharacters(string.toCharArray(), true, false, false, false, false);
+      writer.writeBlockString(string, false, false, true);
     });
 
     private final BiConsumer<YamlWriter, String> writeFunction;

@@ -1,0 +1,6 @@
+first_value: "renamed"
+OVERRIDE-NAME: "override"
+fallback_value: "canonical"
+version_2_value: 42
+final_value: "fixed"
+annotated_final: "fixed too"

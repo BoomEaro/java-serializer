@@ -191,7 +191,7 @@ class SerializerTest {
     LoadResult result = newSettings.load(configWithoutPrefixPath);
     Assertions.assertEquals(LoadResult.SUCCESS, result);
 
-    this.compareFiles("config.yml", configWithoutPrefixPath);
+    this.compareFiles("config-expected.yml", configWithoutPrefixPath);
 
     Assertions.assertNull(settings.nullField);
     Assertions.assertEquals(testEnumField, newSettings.enumField);

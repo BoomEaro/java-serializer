@@ -1,0 +1,4 @@
+greeting: "Hello {NAME}"
+lines:
+  - "Dear {NAME}"
+  - "Bye {NAME}"

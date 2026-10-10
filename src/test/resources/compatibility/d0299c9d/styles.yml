@@ -1,0 +1,9 @@
+single: 'it''s quoted'
+double-quoted: "double \"quoted\""
+literal: |- 
+  first line
+  second line
+folded: >-
+  first line
+  
+  second line
