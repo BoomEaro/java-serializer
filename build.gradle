@@ -1,152 +1,146 @@
 plugins() {
-  id("java-library")
+    id("java-library")
 
-  id("checkstyle")
-  id("com.github.spotbugs").version("5.0.14")
-  id("org.cadixdev.licenser").version("0.6.1")
+    id("checkstyle")
+    id("com.github.spotbugs").version("5.0.14")
 
-  id("signing")
-  id("maven-publish")
+    id("signing")
+    id("maven-publish")
 }
 
 this.group = "net.elytrium"
 this.version = "1.1.1"
 
 compileJava() {
-  sourceCompatibility = JavaVersion.VERSION_17
-  targetCompatibility = JavaVersion.VERSION_17
-  options.getRelease().set(8)
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    options.getRelease().set(8)
 
-  options.setEncoding("UTF-8")
+    options.setEncoding("UTF-8")
 }
 
 repositories() {
-  mavenCentral()
+    mavenCentral()
 }
 
 dependencies() {
-  annotationProcessor("net.java.dev.jna:jna-platform:5.13.0")
-  annotationProcessor("com.github.bsideup.jabel:jabel-javac-plugin:1.0.0")
+    annotationProcessor("net.java.dev.jna:jna-platform:5.13.0")
+    annotationProcessor("com.github.bsideup.jabel:jabel-javac-plugin:1.0.0")
 
-  compileOnly("com.github.spotbugs:spotbugs-annotations:$spotbugsVersion")
-  testCompileOnly("com.github.spotbugs:spotbugs-annotations:$spotbugsVersion")
+    compileOnly("com.github.spotbugs:spotbugs-annotations:$spotbugsVersion")
+    testCompileOnly("com.github.spotbugs:spotbugs-annotations:$spotbugsVersion")
 
-  testImplementation("it.unimi.dsi:fastutil-core:8.5.12")
+    testImplementation("it.unimi.dsi:fastutil-core:8.5.12")
 
-  testImplementation("org.junit.jupiter:junit-jupiter-api:$junitVersion")
-  testImplementation("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:$junitVersion")
+    testImplementation("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
+    testImplementation("org.junit.platform:junit-platform-launcher:$junitVersion")
 }
 
 test() {
-  useJUnitPlatform()
+    useJUnitPlatform()
 }
 
 checkstyle() {
-  toolVersion = "10.12.1"
+    toolVersion = "10.12.1"
 
-  configFile = file("$rootDir/.config/checkstyle/checkstyle.xml")
-  configProperties = ["configDirectory": "$rootDir/.config/checkstyle"]
-  maxErrors = 0
-  maxWarnings = 0
+    configFile = file("$rootDir/.config/checkstyle/checkstyle.xml")
+    configProperties = ["configDirectory": "$rootDir/.config/checkstyle"]
+    maxErrors = 0
+    maxWarnings = 0
 }
 
 spotbugsMain() {
-  reports.register("html") {
-    required = true
-    outputLocation.value(layout.buildDirectory.file("reports/spotbugs/main/spotbugs.html"))
-    stylesheet = "fancy-hist.xsl"
-  }
-}
-
-license() {
-  header = file("$rootDir/HEADER.txt")
-
-  exclude("**/*.yml")
+    reports.register("html") {
+        required = true
+        outputLocation.value(layout.buildDirectory.file("reports/spotbugs/main/spotbugs.html"))
+        stylesheet = "fancy-hist.xsl"
+    }
 }
 
 tasks.register("sourcesJar", Jar) {
-  archiveClassifier = "sources"
-  from(sourceSets.main.getAllSource())
+    archiveClassifier = "sources"
+    from(sourceSets.main.getAllSource())
 }
 
 tasks.register("javadocJar", Jar) {
-  archiveClassifier = "javadoc"
-  from(javadoc)
+    archiveClassifier = "javadoc"
+    from(javadoc)
 }
 
 javadoc() {
-  options.setEncoding("UTF-8")
-  options.setSource("17")
-  options.links("https://docs.oracle.com/en/java/javase/17/docs/api/")
-  options.addStringOption("Xdoclint:none", "-quiet")
-  if (JavaVersion.current() >= JavaVersion.VERSION_1_9 && JavaVersion.current() < JavaVersion.VERSION_12) {
-    options.addBooleanOption("-no-module-directories", true)
-  }
+    options.setEncoding("UTF-8")
+    options.setSource("17")
+    options.links("https://docs.oracle.com/en/java/javase/17/docs/api/")
+    options.addStringOption("Xdoclint:none", "-quiet")
+    if (JavaVersion.current() >= JavaVersion.VERSION_1_9 && JavaVersion.current() < JavaVersion.VERSION_12) {
+        options.addBooleanOption("-no-module-directories", true)
+    }
 }
 
 artifacts() {
-  archives(sourcesJar)
-  archives(javadocJar)
-  archives(jar)
+    archives(sourcesJar)
+    archives(javadocJar)
+    archives(jar)
 }
 
 publishing() {
-  repositories() {
-    maven() {
-      credentials() {
-        username = System.getenv("ELYTRIUM_MAVEN_USERNAME")
-        password = System.getenv("ELYTRIUM_MAVEN_PASSWORD")
-      }
+    repositories() {
+        maven() {
+            credentials() {
+                username = System.getenv("ELYTRIUM_MAVEN_USERNAME")
+                password = System.getenv("ELYTRIUM_MAVEN_PASSWORD")
+            }
 
-      name = "elytrium-repo"
-      url = "https://maven.elytrium.net/repo/"
-    }
-
-    maven() {
-      credentials() {
-        username = System.getenv("ELYTRIUM_OSSRH_USERNAME")
-        password = System.getenv("ELYTRIUM_OSSRH_PASSWORD")
-      }
-
-      name = "ossrh-repo"
-      url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
-    }
-  }
-
-  publications.create("publication", MavenPublication) {
-    pom() {
-      name = "Elytrium Java Serializer"
-      description = "Java Library to (de-)serialize data in various formats (e.g. JSON, YAML)"
-      url = "https://github.com/Elytrium/java-serializer"
-      licenses() {
-        license() {
-          name = "GNU Lesser General Public License v3.0"
-          url = "https://www.gnu.org/licenses/lgpl-3.0.en.html"
+            name = "elytrium-repo"
+            url = "https://maven.elytrium.net/repo/"
         }
-      }
-      developers() {
-        developer() {
-          id = "hevav"
-          name = "Petr Ilin"
-          email = "p.ilin@elytrium.net"
+
+        maven() {
+            credentials() {
+                username = System.getenv("ELYTRIUM_OSSRH_USERNAME")
+                password = System.getenv("ELYTRIUM_OSSRH_PASSWORD")
+            }
+
+            name = "ossrh-repo"
+            url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
         }
-      }
-      scm() {
-        connection = "scm:git:git://github.com/Elytrium/java-serializer.git"
-        developerConnection = "scm:git:ssh://github.com/Elytrium/java-serializer.git"
-        url = "https://github.com/Elytrium/java-serializer"
-      }
     }
 
-    artifact(sourcesJar)
-    artifact(javadocJar)
-    artifact(jar)
-  }
+    publications.create("publication", MavenPublication) {
+        pom() {
+            name = "Elytrium Java Serializer"
+            description = "Java Library to (de-)serialize data in various formats (e.g. JSON, YAML)"
+            url = "https://github.com/Elytrium/java-serializer"
+            licenses() {
+                license() {
+                    name = "GNU Lesser General Public License v3.0"
+                    url = "https://www.gnu.org/licenses/lgpl-3.0.en.html"
+                }
+            }
+            developers() {
+                developer() {
+                    id = "hevav"
+                    name = "Petr Ilin"
+                    email = "p.ilin@elytrium.net"
+                }
+            }
+            scm() {
+                connection = "scm:git:git://github.com/Elytrium/java-serializer.git"
+                developerConnection = "scm:git:ssh://github.com/Elytrium/java-serializer.git"
+                url = "https://github.com/Elytrium/java-serializer"
+            }
+        }
+
+        artifact(sourcesJar)
+        artifact(javadocJar)
+        artifact(jar)
+    }
 }
 
 signing() {
-  if (rootProject.hasProperty("signing.keyId")) {
-    sign(publishing.publications.publication)
-    sign(configurations.archives)
-  }
+    if (rootProject.hasProperty("signing.keyId")) {
+        sign(publishing.publications.publication)
+        sign(configurations.archives)
+    }
 }
