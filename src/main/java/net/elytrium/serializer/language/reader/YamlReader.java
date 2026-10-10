@@ -17,8 +17,6 @@
 
 package net.elytrium.serializer.language.reader;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -46,6 +44,7 @@ import net.elytrium.serializer.placeholders.DefaultPlaceholderReplacer;
 import net.elytrium.serializer.placeholders.PlaceholderReplacer;
 import net.elytrium.serializer.placeholders.Placeholders;
 import net.elytrium.serializer.utils.GenericUtils;
+import org.jetbrains.annotations.Nullable;
 
 @SuppressWarnings({"StringRepeatCanBeUsed"}) // Ignore modern methods, because we support up to Java 8.
 public class YamlReader extends AbstractReader {
@@ -69,7 +68,6 @@ public class YamlReader extends AbstractReader {
     this.yamlSerializable = null;
   }
 
-  @SuppressFBWarnings("EI_EXPOSE_REP2")
   public YamlReader(BufferedReader reader, SerializerConfig config, YamlSerializable serializable) {
     super(config, reader);
     this.yamlSerializable = serializable;
@@ -81,7 +79,6 @@ public class YamlReader extends AbstractReader {
   }
 
   @Override
-  @SuppressFBWarnings("SA_FIELD_SELF_COMPARISON")
   public void readSerializableObject(@Nullable Field owner, Object holder, Class<?> clazz) {
     synchronized (this) {
       this.unsetTempRestoreNewLine();
@@ -417,7 +414,6 @@ public class YamlReader extends AbstractReader {
   }
 
   @SuppressWarnings("DuplicatedCode")
-  @SuppressFBWarnings("SA_FIELD_SELF_COMPARISON")
   private <C extends Map<Object, Object>> C readMapFromMarker(@Nullable Field owner, C result, Type keyType, Type valueType, char marker) {
     if (this.skipComments(owner, marker, false)) { // TODO сделать чтобы map:#comm не читалось
       marker = AbstractReader.NEW_LINE;
@@ -535,7 +531,6 @@ public class YamlReader extends AbstractReader {
     return this.readCollectionFromMarker(owner, new ArrayList<>(), Object.class, marker);
   }
 
-  @SuppressFBWarnings("SA_FIELD_SELF_COMPARISON")
   private <C extends Collection<Object>> C readCollectionFromMarker(@Nullable Field owner, C result, Type type, char marker) {
     if (this.skipComments(owner, marker, false)) { // TODO сделать чтобы collection:#comm не читалось
       marker = AbstractReader.NEW_LINE;
@@ -1022,7 +1017,6 @@ public class YamlReader extends AbstractReader {
     }
   }
 
-  @SuppressFBWarnings("SA_FIELD_SELF_COMPARISON")
   private void skipCollectionFromMarker(@Nullable Field owner, char marker) {
     if (this.skipComments(owner, marker, false)) {
       marker = AbstractReader.NEW_LINE;
@@ -1088,7 +1082,6 @@ public class YamlReader extends AbstractReader {
   }
 
   @SuppressWarnings("DuplicatedCode")
-  @SuppressFBWarnings("SA_FIELD_SELF_COMPARISON")
   private void skipMapFromMarker(@Nullable Field owner, char marker) {
     if (this.skipComments(owner, marker, false)) {
       marker = AbstractReader.NEW_LINE;

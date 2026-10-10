@@ -24,7 +24,6 @@ import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.Nullable;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.Comment;
 import net.elytrium.serializer.annotations.CommentValue;
@@ -35,6 +34,7 @@ import net.elytrium.serializer.annotations.Transient;
 import net.elytrium.serializer.custom.ClassSerializer;
 import net.elytrium.serializer.exceptions.ReflectionException;
 import net.elytrium.serializer.exceptions.SerializableWriteException;
+import org.jetbrains.annotations.Nullable;
 
 public abstract class AbstractWriter {
 

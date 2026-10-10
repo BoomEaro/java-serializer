@@ -17,7 +17,6 @@
 
 package net.elytrium.serializer;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntLinkedOpenHashSet;
@@ -60,7 +59,6 @@ import net.elytrium.serializer.placeholders.Placeholders;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-@SuppressFBWarnings("UWF_NULL_FIELD")
 class SerializerTest {
 
   @Test

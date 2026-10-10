@@ -17,7 +17,6 @@
 
 package net.elytrium.serializer.language.reader;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
@@ -37,7 +36,6 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.CollectionType;
 import net.elytrium.serializer.annotations.MapType;
@@ -46,6 +44,7 @@ import net.elytrium.serializer.custom.ClassSerializer;
 import net.elytrium.serializer.exceptions.ReflectionException;
 import net.elytrium.serializer.exceptions.SerializableReadException;
 import net.elytrium.serializer.utils.GenericUtils;
+import org.jetbrains.annotations.Nullable;
 
 public abstract class AbstractReader {
 
@@ -255,7 +254,6 @@ public abstract class AbstractReader {
   }
 
   @SuppressWarnings("unchecked")
-  @SuppressFBWarnings("NP_LOAD_OF_KNOWN_NULL_VALUE")
   private Map<Object, Object> readMapByType(Field owner, Type type) {
     Type mapKeyType = GenericUtils.getParameterType(Map.class, type, 0);
     Type mapValueType = GenericUtils.getParameterType(Map.class, type, 1);
@@ -286,7 +284,6 @@ public abstract class AbstractReader {
   }
 
   @SuppressWarnings("unchecked")
-  @SuppressFBWarnings("NP_LOAD_OF_KNOWN_NULL_VALUE")
   private Collection<Object> readCollectionByType(Field owner, Type type, Class<?> clazz) {
     Type collectionEntryType = GenericUtils.getParameterType(Collection.class, type, 0);
     if (owner != null) {

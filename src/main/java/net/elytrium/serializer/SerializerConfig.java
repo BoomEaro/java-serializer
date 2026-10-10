@@ -17,8 +17,6 @@
 
 package net.elytrium.serializer;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
@@ -28,6 +26,7 @@ import java.util.Map;
 import net.elytrium.serializer.annotations.Serializer;
 import net.elytrium.serializer.custom.ClassSerializer;
 import net.elytrium.serializer.placeholders.PlaceholderReplacer;
+import org.jetbrains.annotations.Nullable;
 
 public class SerializerConfig {
 
@@ -206,7 +205,6 @@ public class SerializerConfig {
     return this.doubledLineSeparator;
   }
 
-  @SuppressFBWarnings("EI_EXPOSE_REP")
   public char[] getLineSeparatorChars() {
     return this.lineSeparatorChars;
   }

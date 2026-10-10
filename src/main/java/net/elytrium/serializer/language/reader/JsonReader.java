@@ -19,8 +19,8 @@ package net.elytrium.serializer.language.reader;
 
 import java.io.BufferedReader;
 import java.lang.reflect.Field;
-import javax.annotation.Nullable;
 import net.elytrium.serializer.SerializerConfig;
+import org.jetbrains.annotations.Nullable;
 
 public class JsonReader extends YamlReader {
 

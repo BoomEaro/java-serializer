@@ -19,9 +19,9 @@ package net.elytrium.serializer.language.writer;
 
 import java.io.BufferedWriter;
 import java.lang.reflect.Field;
-import javax.annotation.Nullable;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.Comment;
+import org.jetbrains.annotations.Nullable;
 
 public class JsonWriter extends YamlWriter {
 

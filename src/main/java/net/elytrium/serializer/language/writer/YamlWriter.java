@@ -17,15 +17,14 @@
 
 package net.elytrium.serializer.language.writer;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.BufferedWriter;
 import java.lang.reflect.Field;
 import java.util.function.BiConsumer;
-import javax.annotation.Nullable;
 import net.elytrium.serializer.SerializerConfig;
 import net.elytrium.serializer.annotations.Comment;
 import net.elytrium.serializer.annotations.YamlStringStyle;
 import net.elytrium.serializer.language.object.YamlSerializable;
+import org.jetbrains.annotations.Nullable;
 
 public class YamlWriter extends AbstractWriter {
 
@@ -43,7 +42,6 @@ public class YamlWriter extends AbstractWriter {
     this.yamlSerializable = null;
   }
 
-  @SuppressFBWarnings("EI_EXPOSE_REP2")
   public YamlWriter(SerializerConfig config, BufferedWriter writer, YamlSerializable serializable) {
     super(config, writer);
     this.yamlSerializable = serializable;
