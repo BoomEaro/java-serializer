@@ -31,8 +31,8 @@ Elytrium Java Serializer is uploaded to the Maven Central repository, so you can
      </dependency>
    </dependencies>
    ```
-- Gradle (build.gradle):
-   ```groovy
+- Gradle (build.gradle.kts):
+   ```kotlin
    dependencies {
      implementation("net.elytrium:serializer:1.2.0")
    }
@@ -266,6 +266,7 @@ In case if you can't add @Serializer annotation or if you have multiple entries 
 
 Run `./gradlew build` with a Java 21 JDK installed.
 
+The build uses Kotlin DSL (`build.gradle.kts` and `settings.gradle.kts`). External dependency coordinates and versions, including JUnit and Checkstyle, are maintained in `gradle/libs.versions.toml`.
 
 ## Support
 

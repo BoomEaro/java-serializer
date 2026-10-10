@@ -1,0 +1,17 @@
+[versions]
+jetbrains-annotations = "26.1.0"
+fastutil = "8.5.12"
+snakeyaml = "2.7"
+jackson = "2.22.0"
+junit = "6.1.3"
+checkstyle = "10.12.1"
+
+[libraries]
+jetbrains-annotations = { module = "org.jetbrains:annotations", version.ref = "jetbrains-annotations" }
+fastutil-core = { module = "it.unimi.dsi:fastutil-core", version.ref = "fastutil" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
+junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit" }
+junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit" }
+checkstyle = { module = "com.puppycrawl.tools:checkstyle", version.ref = "checkstyle" }
