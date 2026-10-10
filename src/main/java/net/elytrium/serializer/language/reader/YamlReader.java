@@ -621,6 +621,8 @@ public class YamlReader extends AbstractReader {
             this.readRaw(); // To ensure the reading doesn't stop at \"
           }
         }
+
+        this.readQuotedValueEnd(owner);
       }
       case '\'' -> {
         while (true) {
@@ -638,6 +640,8 @@ public class YamlReader extends AbstractReader {
             result = marker;
           }
         }
+
+        this.readQuotedValueEnd(owner);
       }
       default -> {
         if (this.isNullSkippedFromMarker(marker)) {
@@ -754,6 +758,8 @@ public class YamlReader extends AbstractReader {
           if (marker != ':') {
             throw new IllegalStateException("Got illegal marker when reading node name: " + marker + " for " + result);
           }
+        } else {
+          this.readQuotedValueEnd(owner);
         }
       }
       case '\'' -> {
@@ -801,6 +807,8 @@ public class YamlReader extends AbstractReader {
           if (marker != ':') {
             throw new IllegalStateException("Got illegal marker when reading node name: " + marker + " for " + result);
           }
+        } else {
+          this.readQuotedValueEnd(owner);
         }
       }
       default -> {
@@ -1153,6 +1161,8 @@ public class YamlReader extends AbstractReader {
           if (marker != ':') {
             throw new IllegalStateException("Got illegal marker when reading node name: " + marker);
           }
+        } else {
+          this.readQuotedValueEnd(owner);
         }
       }
       case '\'' -> {
@@ -1168,6 +1178,8 @@ public class YamlReader extends AbstractReader {
           if (marker != ':') {
             throw new IllegalStateException("Got illegal marker when reading node name: " + marker);
           }
+        } else {
+          this.readQuotedValueEnd(owner);
         }
       }
       default -> {
@@ -1278,6 +1290,15 @@ public class YamlReader extends AbstractReader {
 
   private boolean isFlowDelimiter(char marker) {
     return this.bracketOpened && (marker == ',' || marker == ']' || marker == '}');
+  }
+
+  private void readQuotedValueEnd(@Nullable Field owner) {
+    char marker = this.readRawIgnoreEmpty();
+    if (this.isFlowDelimiter(marker)) {
+      this.setReuseBuffer();
+    } else if (!this.isEndMarker(marker) && !this.skipComments(owner, marker, false)) {
+      throw new IllegalStateException("Got illegal marker after quoted value: " + marker);
+    }
   }
 
   private char readQuotedMarker() {
