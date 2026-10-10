@@ -85,7 +85,14 @@ public class YamlReader extends AbstractReader {
   public void readSerializableObject(@Nullable Field owner, Object holder, Class<?> clazz) {
     synchronized (this) {
       this.unsetTempRestoreNewLine();
+      boolean previousBracketOpened = this.bracketOpened;
       this.readBeginSerializableObject(owner);
+      boolean flowObject = this.bracketOpened;
+      if (flowObject && this.readEndSerializableObject(owner)) {
+        this.bracketOpened = previousBracketOpened;
+        return;
+      }
+
       Field[] nodes = clazz.getDeclaredFields();
       if (nodes.length != 0) {
         try {
@@ -119,7 +126,7 @@ public class YamlReader extends AbstractReader {
 
           int correctIndent = this.currentIndent;
           String nodeName;
-          while (correctIndent == this.currentIndent && (nodeName = this.readNodeName(owner)) != null) {
+          while ((flowObject || correctIndent == this.currentIndent) && (nodeName = this.readNodeName(owner)) != null) {
             try {
               Field node = nodeFieldMap.get(nodeName);
               if (node == null) {
@@ -150,10 +157,11 @@ public class YamlReader extends AbstractReader {
             this.readSerializableObjectEntryJoin(owner);
 
             if (this.readEndSerializableObject(owner)) {
+              this.bracketOpened = previousBracketOpened;
               return;
             }
 
-            if (correctIndent != this.currentIndent) {
+            if (!flowObject && correctIndent != this.currentIndent) {
               while (true) {
                 if (!this.skipComments(owner, this.readRaw(), true)) {
                   break;
@@ -167,6 +175,7 @@ public class YamlReader extends AbstractReader {
       }
 
       this.readEndSerializableObject(owner);
+      this.bracketOpened = previousBracketOpened;
     }
   }
 
@@ -218,7 +227,7 @@ public class YamlReader extends AbstractReader {
   @Override
   public void readBeginSerializableObject(@Nullable Field owner) {
     synchronized (this) {
-      this.skipChar('{');
+      this.bracketOpened = this.skipChar('{');
     }
   }
 
@@ -420,7 +429,7 @@ public class YamlReader extends AbstractReader {
       marker = AbstractReader.NEW_LINE;
       this.unsetTempRestoreNewLine();
     } else {
-      nextMarker = this.readRawIgnoreEmptyAndNewLines();
+      nextMarker = marker == '{' ? this.readFlowMarker(owner) : this.readRawIgnoreEmptyAndNewLines();
     }
 
     boolean previousBracketOpened = this.bracketOpened;
@@ -429,7 +438,7 @@ public class YamlReader extends AbstractReader {
         this.bracketOpened = true;
         while (nextMarker != '}') {
           this.readMapEntry(owner, keyType, valueType, this.readNodeNameFromMarker(null, nextMarker), result);
-          nextMarker = this.readRawIgnoreEmptyAndNewLines();
+          nextMarker = this.readFlowSeparator(owner, '}');
         }
 
         this.bracketOpened = previousBracketOpened;
@@ -535,12 +544,16 @@ public class YamlReader extends AbstractReader {
     this.unsetTempRestoreNewLine();
     switch (marker) {
       case '[': {
-        char nextMarker = this.readRawIgnoreEmptyAndNewLines();
+        boolean previousBracketOpened = this.bracketOpened;
+        this.bracketOpened = true;
+        char nextMarker = this.readFlowMarker(owner);
         while (nextMarker != ']') {
+          this.setReuseBuffer();
           result.add(this.readByType0(owner, type));
-          nextMarker = this.readRawIgnoreEmptyAndNewLines();
+          nextMarker = this.readFlowSeparator(owner, ']');
         }
 
+        this.bracketOpened = previousBracketOpened;
         break;
       }
       case AbstractReader.NEW_LINE: {
@@ -592,7 +605,7 @@ public class YamlReader extends AbstractReader {
     Character result = null;
     switch (marker) {
       case '"' -> {
-        while ((marker = this.readRaw()) != '"') {
+        while ((marker = this.readQuotedMarker()) != '"') {
           if (result == null) {
             if (marker == '\\') {
               int character = this.readEscapedCharacter();
@@ -611,7 +624,7 @@ public class YamlReader extends AbstractReader {
       }
       case '\'' -> {
         while (true) {
-          marker = this.readRaw();
+          marker = this.readQuotedMarker();
           if (marker == '\'') {
             if (this.readRaw() == '\'') { // 'text1 ''text2'' text3' reads as "text 'text2' text3".
               if (result == null) {
@@ -631,12 +644,16 @@ public class YamlReader extends AbstractReader {
           return null;
         }
 
-        while (!this.isEndMarker(marker) && (marker != ',' || this.bracketOpened) && !this.skipComments(owner, marker, false)) {
+        while (!this.isEndMarker(marker) && !this.isFlowDelimiter(marker) && !this.skipComments(owner, marker, false)) {
           if (result == null) { // Set the result only after we ensure we not at end of line/field.
             result = marker;
           }
 
           marker = this.readRaw();
+        }
+
+        if (this.isFlowDelimiter(marker)) {
+          this.setReuseBuffer();
         }
       }
     }
@@ -695,7 +712,7 @@ public class YamlReader extends AbstractReader {
         }
 
         int newLineCount = 0;
-        while ((marker = this.readRaw()) != '"') {
+        while ((marker = this.readQuotedMarker()) != '"') {
           if (this.isEndMarker(marker)) {
             if (nodeName) {
               throw new IllegalStateException("Got a new line in node name: " + result);
@@ -746,7 +763,7 @@ public class YamlReader extends AbstractReader {
 
         int newLineCount = 0;
         while (true) {
-          marker = this.readRaw();
+          marker = this.readQuotedMarker();
           if (this.isEndMarker(marker)) {
             if (nodeName) {
               throw new IllegalStateException("Got a new line in node name: " + result);
@@ -804,7 +821,7 @@ public class YamlReader extends AbstractReader {
         // See YamlReader#skipComments(char, boolean) for details about Character.isWhitespace(char) and YamlReader#skipComments(char, true/*!!*/).
         while (nodeName
             ? (marker != ':')
-            : (!this.isEndMarker(marker) && (marker != ',' || this.bracketOpened) && (!Character.isWhitespace(marker) || !this.skipComments(owner, this.readRaw(), true)))) {
+            : (!this.isEndMarker(marker) && !this.isFlowDelimiter(marker) && (!Character.isWhitespace(marker) || !this.skipComments(owner, this.readRaw(), true)))) {
           if (nodeName && this.isEndMarker(marker)) {
             throw new IllegalStateException("Got a new line in node name: " + result);
           }
@@ -828,6 +845,10 @@ public class YamlReader extends AbstractReader {
         }
 
         if (!nodeName) {
+          if (this.isFlowDelimiter(marker)) {
+            this.setReuseBuffer();
+          }
+
           String string = result.toString();
           if (string.equals("null")) {
             return null;
@@ -1001,12 +1022,16 @@ public class YamlReader extends AbstractReader {
 
     switch (marker) {
       case '[': {
-        char nextMarker = this.readRawIgnoreEmptyAndNewLines();
+        boolean previousBracketOpened = this.bracketOpened;
+        this.bracketOpened = true;
+        char nextMarker = this.readFlowMarker(owner);
         while (nextMarker != ']') {
+          this.setReuseBuffer();
           this.skipGuessingType(owner);
-          nextMarker = this.readRawIgnoreEmptyAndNewLines();
+          nextMarker = this.readFlowSeparator(owner, ']');
         }
 
+        this.bracketOpened = previousBracketOpened;
         break;
       }
       case AbstractReader.NEW_LINE: {
@@ -1067,7 +1092,7 @@ public class YamlReader extends AbstractReader {
       marker = AbstractReader.NEW_LINE;
       this.unsetTempRestoreNewLine();
     } else {
-      nextMarker = this.readRawIgnoreEmptyAndNewLines();
+      nextMarker = marker == '{' ? this.readFlowMarker(owner) : this.readRawIgnoreEmptyAndNewLines();
     }
 
     boolean previousBracketOpened = this.bracketOpened;
@@ -1077,7 +1102,7 @@ public class YamlReader extends AbstractReader {
         while (nextMarker != '}') {
           this.skipStringFromMarker(owner, nextMarker, true);
           this.skipGuessingType(owner);
-          nextMarker = this.readRawIgnoreEmptyAndNewLines();
+          nextMarker = this.readFlowSeparator(owner, '}');
         }
 
         this.bracketOpened = previousBracketOpened;
@@ -1115,7 +1140,7 @@ public class YamlReader extends AbstractReader {
   private void skipStringFromMarker(@Nullable Field owner, char marker, boolean nodeName) {
     switch (marker) {
       case '"' -> {
-        while ((marker = this.readRaw()) != '"') {
+        while ((marker = this.readQuotedMarker()) != '"') {
           if (marker == '\\') {
             this.readRaw(); // To ensure the reading doesn't stop at \"
           } else if (nodeName && this.isEndMarker(marker)) {
@@ -1132,11 +1157,12 @@ public class YamlReader extends AbstractReader {
       }
       case '\'' -> {
         do {
-          marker = this.readRaw();
+          marker = this.readQuotedMarker();
           if (nodeName && this.isEndMarker(marker)) {
             throw new IllegalStateException("Got a new line in node name.");
           }
         } while (marker != '\'' || this.readRaw() == '\''); // 'text1 ''text2'' text3' reads as "text 'text2' text3".
+        this.setReuseBuffer();
         if (nodeName) {
           marker = this.readRawIgnoreEmpty();
           if (marker != ':') {
@@ -1158,12 +1184,16 @@ public class YamlReader extends AbstractReader {
         while (nodeName
             ? (marker != ':')
             // Here we don't need to care about bad comments, so we can ignore whitespace check, see YamlReader#skipComments(char, boolean) for details.
-            : (!this.isEndMarker(marker) && (marker != ',' || this.bracketOpened) && !this.skipComments(owner, marker, false))) {
+            : (!this.isEndMarker(marker) && !this.isFlowDelimiter(marker) && !this.skipComments(owner, marker, false))) {
           if (nodeName && this.isEndMarker(marker)) {
             throw new IllegalStateException("Got a new line in node name.");
           }
 
           marker = this.readRaw();
+        }
+
+        if (!nodeName && this.isFlowDelimiter(marker)) {
+          this.setReuseBuffer();
         }
       }
     }
@@ -1246,6 +1276,43 @@ public class YamlReader extends AbstractReader {
     return marker == '\0' || marker == AbstractReader.NEW_LINE;
   }
 
+  private boolean isFlowDelimiter(char marker) {
+    return this.bracketOpened && (marker == ',' || marker == ']' || marker == '}');
+  }
+
+  private char readQuotedMarker() {
+    char marker = this.readRaw();
+    if (marker == '\0') {
+      throw new IllegalStateException("Unexpected end of input in quoted value");
+    }
+
+    return marker;
+  }
+
+  private char readFlowMarker(@Nullable Field owner) {
+    char marker = this.readRawIgnoreEmptyAndNewLines();
+    while (this.skipComments(owner, marker, false)) {
+      marker = this.readRawIgnoreEmptyAndNewLines();
+    }
+
+    if (marker == '\0') {
+      throw new IllegalStateException("Unexpected end of input in flow collection");
+    }
+
+    return marker;
+  }
+
+  private char readFlowSeparator(@Nullable Field owner, char closingMarker) {
+    char marker = this.readFlowMarker(owner);
+    if (marker == ',') {
+      return this.readFlowMarker(owner);
+    } else if (marker != closingMarker) {
+      throw new IllegalStateException("Expected ',' or '" + closingMarker + "' in flow collection, got: " + marker);
+    }
+
+    return marker;
+  }
+
   @Override
   public void setSeek() {
     synchronized (this) {
@@ -1294,8 +1361,11 @@ public class YamlReader extends AbstractReader {
     this.setSeek();
     if (marker == 'n' && this.readRaw() == 'u' && this.readRaw() == 'l' && this.readRaw() == 'l') {
       char endMarker = this.readRawIgnoreEmpty();
-      if (this.isEndMarker(endMarker) || (endMarker == ',' && this.bracketOpened)) {
+      if (this.isEndMarker(endMarker) || this.isFlowDelimiter(endMarker)) {
         this.clearSeek();
+        if (this.isFlowDelimiter(endMarker)) {
+          this.setReuseBuffer();
+        }
         return true;
       }
     }
