@@ -170,7 +170,7 @@ public abstract class AbstractWriter {
     ClassSerializer<Object, ?> classSerializer;
     while ((classSerializer = this.config.getRegisteredSerializer(nodeValue.getClass())) != null) {
       nodeValue = classSerializer.serialize(nodeValue);
-      if (classSerializer.getToType() == classSerializer.getFromType()) {
+      if (classSerializer.getToType().equals(classSerializer.getFromType())) {
         break;
       }
     }

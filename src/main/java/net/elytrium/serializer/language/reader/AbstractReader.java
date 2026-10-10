@@ -164,7 +164,7 @@ public abstract class AbstractReader {
       clazz = classSerializer.getFromClass();
       type = classSerializer.getFromType();
 
-      if (classSerializer.getToType() == classSerializer.getFromType()) {
+      if (classSerializer.getToType().equals(classSerializer.getFromType())) {
         break;
       }
     }

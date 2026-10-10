@@ -927,7 +927,7 @@ public class YamlReader extends AbstractReader {
 
     int newLineCount = 0;
     boolean firstLine = true;
-    while (indentOffset >= fixedIndent) {
+    while (marker != '\0' && indentOffset >= fixedIndent) {
       if (marker == AbstractReader.NEW_LINE) {
         ++newLineCount;
         marker = this.readRawIgnoreEmpty();
@@ -962,7 +962,7 @@ public class YamlReader extends AbstractReader {
       case '+' -> {
 
       }
-      default -> newLineCount = 1;
+      default -> newLineCount = Math.min(1, newLineCount);
     }
 
     for (int i = 0; i < newLineCount; ++i) {
@@ -1246,7 +1246,7 @@ public class YamlReader extends AbstractReader {
       throw new IllegalStateException("Indentation marker does not match current indent offset: " + indentOffset);
     }
 
-    while (fixedIndent <= indentOffset) {
+    while (marker != '\0' && fixedIndent <= indentOffset) {
       if (marker == AbstractReader.NEW_LINE) {
         marker = this.readRawIgnoreEmpty();
         indentOffset = (marker == AbstractReader.NEW_LINE ? this.newLineIndent : this.currentIndent) - this.nodeIndent;

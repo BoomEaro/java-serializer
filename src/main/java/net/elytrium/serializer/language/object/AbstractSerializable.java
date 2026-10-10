@@ -20,9 +20,14 @@ package net.elytrium.serializer.language.object;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.DosFileAttributeView;
+import java.nio.file.attribute.DosFileAttributes;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import net.elytrium.serializer.LoadResult;
@@ -104,8 +109,8 @@ public abstract class AbstractSerializable {
   public LoadResult load(Path path) {
     Path absolutePath = path.toAbsolutePath();
     if (Files.exists(absolutePath)) {
-      try {
-        return this.load(Files.newBufferedReader(absolutePath)) ? LoadResult.SUCCESS : LoadResult.BACKUP_PREFERRED;
+      try (BufferedReader reader = Files.newBufferedReader(absolutePath)) {
+        return this.load(reader) ? LoadResult.SUCCESS : LoadResult.BACKUP_PREFERRED;
       } catch (IOException e) {
         throw new SerializableReadException(e);
       }
@@ -132,13 +137,56 @@ public abstract class AbstractSerializable {
   public void save(Path path) {
     try {
       Path absolutePath = path.toAbsolutePath();
+      if (Files.exists(absolutePath) || Files.isSymbolicLink(absolutePath)) {
+        absolutePath = absolutePath.toRealPath();
+      }
+
       Path parent = absolutePath.getParent();
       if (parent == null) {
         throw new NullPointerException("Parent path is null for " + absolutePath);
       }
 
       Files.createDirectories(parent);
-      this.save(Files.newBufferedWriter(absolutePath));
+      Path temporaryPath = Files.createTempFile(parent, ".serializer-", ".tmp");
+      try {
+        if (Files.exists(absolutePath)) {
+          PosixFileAttributeView posixView = Files.getFileAttributeView(absolutePath, PosixFileAttributeView.class);
+          if (posixView != null) {
+            Files.setPosixFilePermissions(temporaryPath, posixView.readAttributes().permissions());
+          }
+
+          AclFileAttributeView aclView = Files.getFileAttributeView(absolutePath, AclFileAttributeView.class);
+          if (aclView != null) {
+            Files.getFileAttributeView(temporaryPath, AclFileAttributeView.class).setAcl(aclView.getAcl());
+          }
+
+          DosFileAttributeView dosView = Files.getFileAttributeView(absolutePath, DosFileAttributeView.class);
+          if (dosView != null) {
+            DosFileAttributes attributes = dosView.readAttributes();
+            DosFileAttributeView temporaryView = Files.getFileAttributeView(temporaryPath, DosFileAttributeView.class);
+            temporaryView.setHidden(attributes.isHidden());
+            temporaryView.setSystem(attributes.isSystem());
+          }
+        }
+
+        try (BufferedWriter writer = Files.newBufferedWriter(temporaryPath)) {
+          this.save(writer);
+        }
+
+        try {
+          Files.move(temporaryPath, absolutePath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+          Files.move(temporaryPath, absolutePath, StandardCopyOption.REPLACE_EXISTING);
+        }
+      } catch (IOException | RuntimeException | Error e) {
+        try {
+          Files.deleteIfExists(temporaryPath);
+        } catch (IOException cleanupException) {
+          e.addSuppressed(cleanupException);
+        }
+
+        throw e;
+      }
     } catch (IOException e) {
       throw new SerializableWriteException(e);
     }
@@ -164,7 +212,7 @@ public abstract class AbstractSerializable {
           + "Either construct AbstractSerializable with serializablePath or call AbstractSerializable#backup(Path) method.");
     }
 
-    this.save(this.serializablePath);
+    this.backup(this.serializablePath);
   }
 
   public void backup(Path path) {
